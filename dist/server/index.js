@@ -3,6 +3,7 @@ const page = `<!doctype html>
 <title>Pendientes City Bell</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f8f3f8;color:#3c3349;font:16px system-ui,sans-serif}main{max-width:650px;margin:auto;padding:clamp(22px,6vw,54px) 18px}header{padding:32px 26px;background:#e3d8f2;color:#3c3349;border-radius:24px}h1{font-size:clamp(27px,7vw,44px);margin:0;letter-spacing:-.04em}header p{margin:8px 0 0;color:#514662}section{margin-top:18px;background:#fffdfb;padding:20px;border-radius:20px}label{display:block;font-weight:700;margin-bottom:8px}.entry,li{display:flex;gap:10px;align-items:center}input,button{font:inherit}input:not([type=checkbox]){min-width:0;flex:1;border:1px solid #947da8;background:#fffdfb;color:#3c3349;border-radius:10px;padding:12px}button{border:0;border-radius:10px;padding:12px 16px;background:#d1eada;color:#264738;cursor:pointer}button:disabled{opacity:.6}input[type=checkbox]{width:22px;height:22px;flex:none;accent-color:#567863;cursor:pointer}ul{margin:0;padding:0;list-style:none}li{padding:12px 0;border-bottom:1px solid #e9e0ef;overflow-wrap:anywhere}li:last-child{border:0}li:has(:checked) span{text-decoration:line-through;color:#61556d}#status{margin:10px 0 0;color:#8b415b}#status:empty{display:none}#empty{color:#61556d}h2{font-size:19px;margin:0 0 8px}button:focus-visible,input:focus-visible{outline:3px solid #78638f;outline-offset:2px}
+li{flex-wrap:wrap}li span{flex:1;min-width:120px}.actions{display:flex;gap:6px;margin-left:auto}.actions button{padding:8px 10px;background:#eee6f6;color:#3c3349}.actions button:last-child{background:#f6e1e8;color:#70334a}
 </style>
 <main><header><h1>Pendientes City Bell</h1><p id="count" aria-live="polite">Cargando lista…</p></header>
 <section><form><label for="title">Nuevo pendiente</label><div class="entry"><input id="title" maxlength="200" required placeholder="¿Qué tenés que hacer?"><button>Agregar</button></div></form><p id="status" role="alert"></p></section>
@@ -37,7 +38,30 @@ function render(items) {
       if(busy){check.checked=!value;return;}
       await run(async()=>{try{render(await api({accion:'marcar',id:item.id,hecho:value}));}catch(error){check.checked=!value;throw error;}});
     };
-    row.append(check,name);
+    const actions=document.createElement('div');
+    actions.className='actions';
+    const edit=document.createElement('button');
+    edit.textContent='Editar';
+    edit.setAttribute('aria-label','Editar '+item.titulo);
+    edit.onclick=()=>{
+      if(busy)return;
+      const value=window.prompt('Editar pendiente',item.titulo);
+      if(value===null || value.trim()===item.titulo)return;
+      if(!value.trim() || value.trim().length>200){
+        status.textContent='Escribí un pendiente de entre 1 y 200 caracteres.';
+        return;
+      }
+      run(async()=>render(await api({accion:'editar',id:item.id,titulo:value})));
+    };
+    const remove=document.createElement('button');
+    remove.textContent='Borrar';
+    remove.setAttribute('aria-label','Borrar '+item.titulo);
+    remove.onclick=()=>{
+      if(busy || !window.confirm('¿Borrar el pendiente «'+item.titulo+'»?'))return;
+      run(async()=>render(await api({accion:'borrar',id:item.id})));
+    };
+    actions.append(edit,remove);
+    row.append(check,name,actions);
     list.append(row);
   }
 }
@@ -71,9 +95,24 @@ async function list(db) {
   const {results} = await db.prepare('SELECT id, titulo, hecho FROM pendientes ORDER BY hecho, id DESC').all();
   return results;
 }
-async function add(db, title) {
+function validateTitle(title) {
   if(typeof title!=='string' || !title.trim() || title.trim().length>200) throw new RangeError('Escribí un pendiente de hasta 200 caracteres.');
-  return db.prepare('INSERT INTO pendientes(titulo) VALUES (?) RETURNING id, titulo, hecho').bind(title.trim()).first();
+  return title.trim();
+}
+function validateId(id) {
+  if(!Number.isSafeInteger(id) || id<1) throw new RangeError('ID inválido.');
+}
+async function edit(db, id, title) {
+  validateId(id);
+  const item=await db.prepare('UPDATE pendientes SET titulo=? WHERE id=? RETURNING id').bind(validateTitle(title),id).first();
+  if(!item) throw new RangeError('No encontré ese pendiente.');
+}
+async function remove(db, id) {
+  validateId(id);
+  await db.prepare('DELETE FROM pendientes WHERE id=?').bind(id).run();
+}
+async function add(db, title) {
+  return db.prepare('INSERT INTO pendientes(titulo) VALUES (?) RETURNING id, titulo, hecho').bind(validateTitle(title)).first();
 }
 async function mark(db, id, done) {
   if(!Number.isSafeInteger(id) || id<1 || typeof done!=='boolean') throw new RangeError('ID o estado inválido.');
@@ -120,6 +159,8 @@ export default {
           const item=await request.json();
           if(item.accion==='agregar') await add(env.DB,item.titulo);
           else if(item.accion==='marcar') await mark(env.DB,item.id,item.hecho);
+          else if(item.accion==='editar') await edit(env.DB,item.id,item.titulo);
+          else if(item.accion==='borrar') await remove(env.DB,item.id);
           else return json({error:'Acción desconocida'},400);
           return json(await list(env.DB));
         }
