@@ -87,6 +87,8 @@ window.addEventListener('focus',refresh);
 setInterval(()=>{if(!document.hidden)refresh();},30000);
 </script></html>`;
 
+const pagesOrigin = "https://oscarmartell.github.io";
+
 const definitions = [
   {name:'listar_pendientes',description:'Lista las tareas de Pendientes City Bell.',inputSchema:{type:'object',properties:{}}},
   {name:'agregar_pendiente',description:'Agrega una tarea a Pendientes City Bell.',inputSchema:{type:'object',properties:{titulo:{type:'string',minLength:1,maxLength:200}},required:['titulo']}},
@@ -155,16 +157,25 @@ export default {
       if(url.pathname==='/' && request.method==='GET') return new Response(page,{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
       if(url.pathname==='/mcp' && request.method==='POST') return await mcp(request,env.DB);
       if(url.pathname==='/api/pendientes'){
-        if(request.method==='GET') return json(await list(env.DB));
+        const origin=request.headers.get('Origin');
+        const cors=origin===pagesOrigin ? {
+          'Access-Control-Allow-Origin':pagesOrigin,
+          'Access-Control-Allow-Methods':'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers':'Content-Type',
+          'Vary':'Origin'
+        } : {};
+        const respond=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store',...cors}});
+        if(request.method==='OPTIONS' && origin===pagesOrigin) return new Response(null,{status:204,headers:cors});
+        if(request.method==='GET') return respond(await list(env.DB));
         if(request.method==='POST'){
-          if(request.headers.get('Origin')!==url.origin || !request.headers.get('Content-Type')?.startsWith('application/json')) return json({error:'Solicitud no permitida'},403);
+          if((origin!==url.origin && origin!==pagesOrigin) || !request.headers.get('Content-Type')?.startsWith('application/json')) return json({error:'Solicitud no permitida'},403);
           const item=await request.json();
           if(item.accion==='agregar') await add(env.DB,item.titulo);
           else if(item.accion==='marcar') await mark(env.DB,item.id,item.hecho);
           else if(item.accion==='editar') await edit(env.DB,item.id,item.titulo);
           else if(item.accion==='borrar') await remove(env.DB,item.id);
           else return json({error:'Acción desconocida'},400);
-          return json(await list(env.DB));
+          return respond(await list(env.DB));
         }
       }
       return json({error:'Página no encontrada'},404);
