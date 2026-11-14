@@ -1,0 +1,5 @@
+CREATE TABLE pendientes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  titulo TEXT NOT NULL CHECK(length(titulo) BETWEEN 1 AND 200),
+  hecho INTEGER NOT NULL DEFAULT 0 CHECK(hecho IN (0, 1))
+);
