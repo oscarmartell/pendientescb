@@ -3,7 +3,7 @@ const page = `<!doctype html>
 <title>Pendientes City Bell</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f8f3f8;color:#3c3349;font:16px system-ui,sans-serif}main{max-width:650px;margin:auto;padding:clamp(22px,6vw,54px) 18px}header{padding:32px 26px;background:#e3d8f2;color:#3c3349;border-radius:24px}h1{font-size:clamp(27px,7vw,44px);margin:0;letter-spacing:-.04em}header p{margin:8px 0 0;color:#514662}section{margin-top:18px;background:#fffdfb;padding:20px;border-radius:20px}label{display:block;font-weight:700;margin-bottom:8px}.entry,li{display:flex;gap:10px;align-items:center}input,button{font:inherit}input:not([type=checkbox]){min-width:0;flex:1;border:1px solid #947da8;background:#fffdfb;color:#3c3349;border-radius:10px;padding:12px}button{border:0;border-radius:10px;padding:12px 16px;background:#d1eada;color:#264738;cursor:pointer}button:disabled{opacity:.6}input[type=checkbox]{width:22px;height:22px;flex:none;accent-color:#567863;cursor:pointer}ul{margin:0;padding:0;list-style:none}li{padding:12px 0;border-bottom:1px solid #e9e0ef;overflow-wrap:anywhere}li:last-child{border:0}li:has(:checked) span{text-decoration:line-through;color:#61556d}#status{margin:10px 0 0;color:#8b415b}#status:empty{display:none}#empty{color:#61556d}h2{font-size:19px;margin:0 0 8px}button:focus-visible,input:focus-visible{outline:3px solid #78638f;outline-offset:2px}
-li{flex-wrap:wrap}li span{flex:1;min-width:120px}.actions{display:flex;gap:6px;margin-left:auto}.actions button{display:grid;place-items:center;width:44px;height:44px;padding:0;background:#eee6f6;color:#3c3349}.actions svg{width:19px;height:19px}.actions button:last-child{background:#f6e1e8;color:#70334a}
+li{flex-wrap:wrap}li span{flex:1;min-width:120px}.actions{display:flex;gap:6px;margin-left:auto}.actions button{display:grid;place-items:center;width:44px;height:44px;padding:0;background:#eee6f6;color:#3c3349}.actions .star{background:#faf0d9;color:#75510b}.actions .star[aria-pressed=true] svg{fill:#e7ad36}.actions svg{width:19px;height:19px}.actions button:last-child{background:#f6e1e8;color:#70334a}
 </style>
 <main><header><h1>Pendientes City Bell</h1><p id="count" aria-live="polite">Cargando lista…</p></header>
 <section><form><label for="title">Nuevo pendiente</label><div class="entry"><input id="title" maxlength="200" required placeholder="¿Qué tenés que hacer?"><button>Agregar</button></div></form><p id="status" role="alert"></p></section>
@@ -62,7 +62,20 @@ function render(items) {
       if(busy || !window.confirm('¿Borrar el pendiente «'+item.titulo+'»?'))return;
       run(async()=>render(await api({accion:'borrar',id:item.id})));
     };
-    actions.append(edit,remove);
+    const star=document.createElement('button');
+    const favorite=Boolean(item.favorito);
+    star.className='star';
+    star.title=favorite?'Quitar de favoritos':'Marcar como favorito';
+    star.setAttribute('aria-label',star.title+' '+item.titulo);
+    star.setAttribute('aria-pressed',String(favorite));
+    star.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"/></svg>';
+    star.onclick=()=>run(async()=>{
+      const items=await api({accion:'favorito',id:item.id,favorito:!favorite});
+      render(items);
+      list.querySelector('[data-favorite-id="'+item.id+'"]')?.focus();
+    });
+    star.dataset.favoriteId=item.id;
+    actions.append(star,edit,remove);
     row.append(check,name,actions);
     list.append(row);
   }
@@ -96,7 +109,7 @@ const definitions = [
 ];
 const json = (data, status=200) => Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 async function list(db) {
-  const {results} = await db.prepare('SELECT id, titulo, hecho FROM pendientes ORDER BY hecho, id DESC').all();
+  const {results} = await db.prepare('SELECT id, titulo, hecho, favorito FROM pendientes ORDER BY hecho, favorito DESC, id DESC').all();
   return results;
 }
 function validateTitle(title) {
@@ -105,6 +118,12 @@ function validateTitle(title) {
 }
 function validateId(id) {
   if(!Number.isSafeInteger(id) || id<1) throw new RangeError('ID inválido.');
+}
+async function setFavorite(db, id, favorite) {
+  validateId(id);
+  if(typeof favorite!=='boolean') throw new RangeError('Favorito inválido.');
+  const item=await db.prepare('UPDATE pendientes SET favorito=? WHERE id=? RETURNING id').bind(Number(favorite),id).first();
+  if(!item) throw new RangeError('No encontré ese pendiente.');
 }
 async function edit(db, id, title) {
   validateId(id);
@@ -172,6 +191,7 @@ export default {
           const item=await request.json();
           if(item.accion==='agregar') await add(env.DB,item.titulo);
           else if(item.accion==='marcar') await mark(env.DB,item.id,item.hecho);
+          else if(item.accion==='favorito') await setFavorite(env.DB,item.id,item.favorito);
           else if(item.accion==='editar') await edit(env.DB,item.id,item.titulo);
           else if(item.accion==='borrar') await remove(env.DB,item.id);
           else return json({error:'Acción desconocida'},400);
