@@ -1,0 +1,1 @@
+ALTER TABLE pendientes ADD COLUMN favorito INTEGER NOT NULL DEFAULT 0 CHECK(favorito IN (0, 1));
